@@ -64,19 +64,22 @@ def process_cookies(headers,  cs):
     """
     headers = headers.decode()
     cabeceras = headers.split('\n')
-    found = False
+    cookie_header, found = buscar_cabecera(cabeceras, "Cookie")
+    """
+    headers = headers.decode()
+    cabeceras = headers.split('\n')
     for i in cabeceras:
         print(i)
-        if i.startswith('Cookie'):
+        if i.startswith('Cookie'):   
             if i.split(':')[1] == MAX_ACCESOS:
                 found = True
                 return MAX_ACCESOS
             else:
-                """i='Cookie: '+ i.split(":")[1] + 1
+                i='Cookie: '+ i.split(":")[1] + 1
                 found = True
                 cadena = ' '.join(cabeceras)
                 cadena = cadena.encode()
-                cs.send(cadena)"""
+                cs.send(cadena)
                 cookie_valor = i.split(":")[1]
                 cookie_int = int(cookie_valor)
                 cookie_int=+ AUMENTO_COOKIE_POR_DEFECTO
@@ -91,7 +94,32 @@ def process_cookies(headers,  cs):
         cadena = ' '.join(cabeceras)
         cadena = cadena.encode()
         cs.send(cadena)
-        return 1
+        return 1"""
+    if found:
+        if cookie_header.split(':')[1] == MAX_ACCESOS:
+                return MAX_ACCESOS
+        else:
+                cookie_header='Cookie: '+ cookie_header.split(":")[1] + 1
+                cadena = ' '.join(cabeceras)
+                cadena = cadena.encode()
+                cs.send(cadena)
+                cookie_valor = i.split(":")[1]
+                cookie_int = int(cookie_valor)
+                cookie_int=+ AUMENTO_COOKIE_POR_DEFECTO
+                cookie_header.split(":")[1] = cookie_int
+                cadena = ' '.join(cabeceras)
+                cadena = cadena.encode()
+                cs.send(cadena)
+                return cookie_int
+    cabeceras.append('Cookie: 1\n')
+    cadena = ' '.join(cabeceras)
+    cadena = cadena.encode()
+    cs.send(cadena)
+    return 1
+
+    
+    
+        
 
 
 
@@ -114,13 +142,18 @@ def process_web_request(cs, webroot):
             datos = datos.decode()
             logger.info(datos)
          ##       * Analizar que la línea de solicitud y comprobar está bien formateada según HTTP 1.1
-            
+            lineas = datos.split("\r\n")
+            linea_solicitud = lineas[0].strip()
+            if linea_solicitud.split(" ")[2] != "HTTP/1.1": 
+                break
          ##          * Devuelve una lista con los atributos de las cabeceras.
-
+            cabeceras = obtener_cabeceras(lineas)
          ##           * Comprobar si la versión de HTTP es 1.1
 
-         ##           * Comprobar si es un método GET o POST. Si no devolver un error Error 405 "Method Not Allowed".
 
+         ##           * Comprobar si es un método GET o POST. Si no devolver un error Error 405 "Method Not Allowed".
+            if linea_solicitud.split(" ")[0] != 'GET' and linea_solicitud.split(" ")[0] != 'POST':
+                logger.error("405 Method Not Allowed: Invalid HTTP method") # DUDA
          ##           * Leer URL y eliminar parámetros si los hubiera
 
          ##           * Comprobar si el recurso solicitado es /, En ese caso el recurso es index.html
@@ -156,6 +189,19 @@ def process_web_request(cs, webroot):
         """    * Si es por timeout, se cierra el socket tras el período de persistencia.
                 * NOTA: Si hay algún error, enviar una respuesta de error con una pequeña página HTML que informe del error.
         """
+def obtener_cabeceras(datos):
+    cabeceras = []
+    for linea in datos[1:]:
+        if ": " in linea: 
+            nombre, valor = linea.split(": ", 1)
+            cabeceras.append((nombre.strip(), valor.strip()))   
+    return cabeceras
+
+def buscar_cabecera(cabeceras, c):
+    for linea in cabeceras:
+        if linea.startswith(c):
+            return linea.strip(), True
+    return None, False
 
 def main():
     """ Función principal del servidor
@@ -180,14 +226,20 @@ def main():
         logger.info("Serving files from {}".format(args.webroot))
 
 
-
+    ## Funcionalidad a realizar
+        ##   * Crea un socket TCP (SOCK_STREAM) 
         servidor = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0)
+        ##  * Permite reusar la misma dirección previamente vinculada a otro proceso. Debe ir antes de sock.bind
+        ##  * Vinculamos el socket a una IP y puerto elegidos
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((args.host, args.port))
+        ## * Escucha conexiones entrantes
         servidor.listen(BACKLOG)
+        ## * Bucle infinito para mantener el servidor activo indefinidamente
         while True:
+            ## - Aceptamos la conexión
             cliente_socket, cliente_direccion = servidor.accept()
-         ## - Creamos un proceso hijo
+            ## - Creamos un proceso hijo
             pid = os.fork()
 
             ## - Si es el proceso hijo se cierra el socket del padre y procesar la petición con process_web_request()
@@ -198,8 +250,8 @@ def main():
                 ##process_cookies(values, cliente_socket)
                 
             ## - Si es el proceso padre cerrar el socket que gestiona el hijo.
-            else:  # Proceso padre
-                cliente_socket.close()  # El padre cierra la conexión con el cliente
+            else:
+                cliente_socket.close()
     except KeyboardInterrupt:
         cerrar_conexion(servidor)
 
