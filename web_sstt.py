@@ -142,24 +142,30 @@ def process_web_request(cs, webroot):
             datos = datos.decode()
             logger.info(datos)
          ##       * Analizar que la línea de solicitud y comprobar está bien formateada según HTTP 1.1
+         # EJEMPLO: GET /index.html HTTP/1.1\r\n
             lineas = datos.split("\r\n")
-            linea_solicitud = lineas[0].strip()
-            if linea_solicitud.split(" ")[2] != "HTTP/1.1": 
+            linea_solicitud = lineas[0].strip(" ")
+            partes = linea_solicitud.split(" ")
+
+            if len(partes) != 3:
                 break
-         ##          * Devuelve una lista con los atributos de las cabeceras.
+            metodo, url, version = partes
+        ##          * Devuelve una lista con los atributos de las cabeceras.
             cabeceras = obtener_cabeceras(lineas)
          ##           * Comprobar si la versión de HTTP es 1.1
-
-
-         ##           * Comprobar si es un método GET o POST. Si no devolver un error Error 405 "Method Not Allowed".
-            if linea_solicitud.split(" ")[0] != 'GET' and linea_solicitud.split(" ")[0] != 'POST':
+            if not version.sartswith("HTTP/1.1"):
+                break
+        ##           * Comprobar si es un método GET o POST. Si no devolver un error Error 405 "Method Not Allowed".
+            metodos_validos = {"GET", "POST"}
+            if metodo not in metodos_validos:
                 logger.error("405 Method Not Allowed: Invalid HTTP method") # DUDA
          ##           * Leer URL y eliminar parámetros si los hubiera
-
+                recurso= url # FALTA HACERLO
          ##           * Comprobar si el recurso solicitado es /, En ese caso el recurso es index.html
-
+            if  recurso.startswith("/"):
+                recurso = "index.html"
          ##           * Construir la ruta absoluta del recurso (webroot + recurso solicitado)
-
+            ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
          ##          * Comprobar que el recurso (fichero) existe, si no devolver Error 404 "Not found"
 
          ##           * Analizar las cabeceras. Imprimir cada cabecera y su valor. Si la cabecera es Cookie comprobar
@@ -202,6 +208,13 @@ def buscar_cabecera(cabeceras, c):
         if linea.startswith(c):
             return linea.strip(), True
     return None, False
+
+
+
+# Ejemplo de uso
+linea_solicitud = "GET /index.html HTTP/1.1"
+valida, mensaje = validar_linea_solicitud(linea_solicitud)
+print(mensaje)
 
 def main():
     """ Función principal del servidor
