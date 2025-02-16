@@ -159,21 +159,28 @@ def process_web_request(cs, webroot):
             metodos_validos = {"GET", "POST"}
             if metodo not in metodos_validos:
                 logger.error("405 Method Not Allowed: Invalid HTTP method") # DUDA
+                break
          ##           * Leer URL y eliminar parámetros si los hubiera
-                recurso= url # FALTA HACERLO
+            recurso= url # FALTA HACERLO
          ##           * Comprobar si el recurso solicitado es /, En ese caso el recurso es index.html
             if  recurso.startswith("/"):
                 recurso = "index.html"
          ##           * Construir la ruta absoluta del recurso (webroot + recurso solicitado)
             ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
          ##          * Comprobar que el recurso (fichero) existe, si no devolver Error 404 "Not found"
-
+            if os.path.isfile(ruta_absoluta):
+                logger.error("404 Not found")
          ##           * Analizar las cabeceras. Imprimir cada cabecera y su valor. Si la cabecera es Cookie comprobar
-                        #process_cookies(value,cs)
+            for c in cabeceras:
+                print("c")
+                if c.startswith('Cookie:'):
+                    cookie_header = c
+                    #found = True
          ##             el valor de cookie_counter para ver si ha llegado a MAX_ACCESOS.
-         
+            valor_cookie = process_cookies(c,cs)
          ##             Si se ha llegado a MAX_ACCESOS devolver un Error "403 Forbidden"
-         
+            if valor_cookie == MAX_ACCESOS:
+                logger.error("403 Forbidden") 
          ##           * Obtener el tamaño del recurso en bytes.
          
          ##           * Extraer extensión para obtener el tipo de archivo. Necesario para la cabecera Content-Type
@@ -199,10 +206,12 @@ def obtener_cabeceras(datos):
     cabeceras = []
     for linea in datos[1:]:
         if ": " in linea: 
-            nombre, valor = linea.split(": ", 1)
-            cabeceras.append((nombre.strip(), valor.strip()))   
+            cabeceras.append(linea.strip())  
+            ##nombre, valor = linea.split(": ", 1)
+            ##cabeceras.append((nombre.strip(), valor.strip()))   
     return cabeceras
 
+    
 def buscar_cabecera(cabeceras, c):
     for linea in cabeceras:
         if linea.startswith(c):
