@@ -176,20 +176,24 @@ def process_web_request(cs, webroot):
                 if c.startswith('Cookie:'):
                     cookie_header = c
                     #found = True
+                    valor_cookie = process_cookies(c,cs)
          ##             el valor de cookie_counter para ver si ha llegado a MAX_ACCESOS.
-            valor_cookie = process_cookies(c,cs)
          ##             Si se ha llegado a MAX_ACCESOS devolver un Error "403 Forbidden"
-            if valor_cookie == MAX_ACCESOS:
-                logger.error("403 Forbidden") 
+                    if valor_cookie == MAX_ACCESOS:
+                        logger.error("403 Forbidden") 
          ##           * Obtener el tamaño del recurso en bytes.
-         
+                
          ##           * Extraer extensión para obtener el tipo de archivo. Necesario para la cabecera Content-Type
          
-         ##           * Preparar respuesta con código 200. Construir una respuesta que incluya: la línea de respuesta y
-         
+         ##           * Preparar respuesta con código 200. Construir una respuesta que incluya: la línea de respuesta y      
          ##             las cabeceras Date, Server, Connection, Set-Cookie (para la cookie cookie_counter),
-         
          ##             Content-Length y Content-Type.
+            cabecera_Date = buscar_cabecera('Date :')
+            cabecera_Server = buscar_cabecera('Server :')
+            cabecera_Connection = buscar_cabecera('Connection :')
+            cabecera_Set_Cookie = buscar_cabecera('Set-Cookie :')
+            cabecera_Content_Length = buscar_cabecera('Content-Length :')
+            cabecera_Content_Type = buscar_cabecera( 'Content-Type :')
          
          ##           * Leer y enviar el contenido del fichero a retornar en el cuerpo de la respuesta.
          
