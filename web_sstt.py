@@ -182,12 +182,14 @@ def process_web_request(cs, webroot):
                     if valor_cookie == MAX_ACCESOS:
                         logger.error("403 Forbidden") 
          ##           * Obtener el tamaño del recurso en bytes.
-                
+            tamano_recurso = os.stat(ruta_absoluta).st_size
          ##           * Extraer extensión para obtener el tipo de archivo. Necesario para la cabecera Content-Type
-         
+            _, extension = os.path.splitext(ruta_absoluta)
+            extension = extension.lstrip(".")
          ##           * Preparar respuesta con código 200. Construir una respuesta que incluya: la línea de respuesta y      
          ##             las cabeceras Date, Server, Connection, Set-Cookie (para la cookie cookie_counter),
          ##             Content-Length y Content-Type.
+            
             cabecera_Date = buscar_cabecera('Date :')
             cabecera_Server = buscar_cabecera('Server :')
             cabecera_Connection = buscar_cabecera('Connection :')
@@ -196,13 +198,16 @@ def process_web_request(cs, webroot):
             cabecera_Content_Type = buscar_cabecera( 'Content-Type :')
          
          ##           * Leer y enviar el contenido del fichero a retornar en el cuerpo de la respuesta.
-         
-         ##           * Se abre el fichero en modo lectura y modo binario
-        
-        ##              * Se lee el fichero en bloques de BUFSIZE bytes (8KB)
-        
-        ##                * Cuando ya no hay más información para leer, se corta el bucle
-        
+           ##           * Se abre el fichero en modo lectura y modo binario
+            with open(ruta_absoluta, "rb") as f:  
+                while True:
+            
+                    ##              * Se lee el fichero en bloques de BUFSIZE bytes (8KB)
+                    bloque = f.read(BUFSIZE)
+                    ##                * Cuando ya no hay más información para leer, se corta el bucle 
+                    if not bloque:  
+                        break  
+                    enviar_mensaje(cs, bloque)  
         """    * Si es por timeout, se cierra el socket tras el período de persistencia.
                 * NOTA: Si hay algún error, enviar una respuesta de error con una pequeña página HTML que informe del error.
         """
@@ -222,12 +227,6 @@ def buscar_cabecera(cabeceras, c):
             return linea.strip(), True
     return None, False
 
-
-
-# Ejemplo de uso
-linea_solicitud = "GET /index.html HTTP/1.1"
-valida, mensaje = validar_linea_solicitud(linea_solicitud)
-print(mensaje)
 
 def main():
     """ Función principal del servidor
