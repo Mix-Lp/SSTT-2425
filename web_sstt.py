@@ -130,6 +130,8 @@ def obtener_cabeceras(lineas):
             cabeceras.append(linea.strip())
     return cabeceras
 
+locale.setlocale(locale.LC_TIME, 'en_US.utf8')
+
 def get_handler(cs,webroot,url):
     # Si la URL empieza por "/" se traduce a index.html
     recurso = "index.html" if url is "/" else url
@@ -149,7 +151,9 @@ def get_handler(cs,webroot,url):
 
     # Actualizamos la cookie usando el diccionario compartido
     valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
+
     logger.info(f"Cookie para la IP actual: {valor_cookie}")
+    #Comprobar que no se ha llegado al maximo
     if valor_cookie == MAX_ACCESOS:
         logger.error("403 Forbidden: Máximo de accesos alcanzado")
         error_response = (
@@ -160,9 +164,10 @@ def get_handler(cs,webroot,url):
         )
         cs.send(error_response.encode())
         return
-    locale.setlocale(locale.LC_TIME, 'en_US.utf8')
+
     date = datetime.datetime.now(datetime.UTC).strftime('%a, %d %b %Y %H:%M:%S GMT')
-    # Enviamos una respuesta HTTP básica con la cabecera Set-Cookie
+
+    #Hacemos la cabecera correcta si funciona correctamente
     respuesta = (
         "HTTP/1.1 200 OK\r\n"
         "Server: web.nombreorganizacion0102.org\r\n"
@@ -183,8 +188,58 @@ def get_handler(cs,webroot,url):
             enviar_mensaje(cs, bloque)
     cerrar_conexion(cs)
 
-def post_handler(cs,webroot,url):
-    pass
+def post_handler(cs,webroot,url,data):
+    recurso = "accion_form.html" if url is "/" else url
+
+    ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
+    if not os.path.isfile(ruta_absoluta):
+        logger.error(f"404 Not Found: Recurso inexistente 1: {ruta_absoluta}")
+        error_response = (
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        )
+        cs.send(error_response.encode())
+        return
+    if data.startswith("email="):
+        data = data.split("=")[1]
+        if data.endswith("um.es"):
+            recurso = "correo_correcto.html"  # Cambiar el recurso a enviar
+
+            ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
+
+            if not os.path.isfile(ruta_absoluta):
+                logger.error(f"404 Not Found: Recurso inexistente 2: {ruta_absoluta}")
+                error_response = (
+                    "HTTP/1.1 404 Not Found\r\n"
+                    "Content-Type: text/html\r\n"
+                    "Content-Length: 0\r\n"
+                    "\r\n"
+                )
+                cs.send(error_response.encode())
+                return
+                # Hacemos la cabecera correcta si funciona correctamente
+            valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
+            date = datetime.datetime.now(datetime.UTC).strftime('%a, %d %b %Y %H:%M:%S GMT')
+            respuesta = (
+                "HTTP/1.1 200 OK\r\n"
+                "Server: web.nombreorganizacion0102.org\r\n"
+                f"Set-Cookie: cookie_counter_16YY={valor_cookie}\r\n"
+                "Content-Type: text/html\r\n"
+                f"Content-Length: {os.path.getsize(ruta_absoluta)}\r\n"
+                f"Date: {date}\r\n"
+                "\r\n"
+            )
+            cs.send(respuesta.encode())
+            with open(ruta_absoluta, "rb") as f:
+                while True:
+                    bloque = f.read(BUFSIZE)
+                    if not bloque:
+                        break
+                    cs.send(bloque)
+
+                #TODO
 
 def process_web_request(cs, webroot):
     """
@@ -216,7 +271,14 @@ def process_web_request(cs, webroot):
     linea_solicitud = lineas[0].strip()
     partes = linea_solicitud.split(" ")
     if len(partes) != 3:
-        logger.error("Línea de solicitud mal formateada")
+        error_response = (
+            "HTTP/1.1 400 Bad Request\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: 0\r\n"
+            "\r\n"
+        )
+        logger.error("HTTP/1.1 400 Bad Request")
+        cs.send(error_response.encode())
         return
 
     metodo, url, version = partes
@@ -228,17 +290,18 @@ def process_web_request(cs, webroot):
     metodos_validos = {"GET", "POST"}
     if metodo not in metodos_validos:
         error_response = (
-            "HTTP/1.1 403 Forbidden\r\n"
+            "HTTP/1.1 405 Method Not Allowed\r\n"
             "Content-Type: text/html\r\n"
             "Content-Length: 0\r\n"
             "\r\n"
         )
         cs.send(error_response.encode())
+        logger.error("HTTP/1.1 405 Method Not Allowed")
         return
     if metodo=="GET":
         get_handler(cs, webroot, url)
     else:
-        post_handler(cs, webroot, url)
+        post_handler(cs, webroot, url,lineas[len(lineas)-1])
 
 def main():
     """Función principal del servidor."""
