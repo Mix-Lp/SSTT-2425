@@ -62,9 +62,11 @@ def process_cookies(headers,  cs):
         4. Si se encuentra y tiene el valor MAX_ACCESSOS se devuelve MAX_ACCESOS
         5. Si se encuentra y tiene un valor 1 <= x < MAX_ACCESOS se incrementa en 1 y se devuelve el valor
     """
-    headers = headers.decode()
+
+    header_cookie = "cookie_counter_16YY"
+    #headers = headers.decode()
     cabeceras = headers.split('\n')
-    cookie_header, found = buscar_cabecera(cabeceras, "Cookie")
+    cookie_header, found = buscar_cabecera(cabeceras, header_cookie)
     """
     headers = headers.decode()
     cabeceras = headers.split('\n')
@@ -96,31 +98,44 @@ def process_cookies(headers,  cs):
         cs.send(cadena)
         return 1"""
     if found:
-        if cookie_header.split(':')[1] == MAX_ACCESOS:
-                return MAX_ACCESOS
+        # Se espera que el formato sea "cookie_counter_16YY: <valor>"
+        parts = cookie_header.split(":")
+        if len(parts) < 2:
+            # Si el formato es incorrecto, se establece el contador en 1
+            cookie_val = 1
         else:
-                cookie_header='Cookie: '+ cookie_header.split(":")[1] + 1
-                cadena = ' '.join(cabeceras)
-                cadena = cadena.encode()
-                cs.send(cadena)
-                cookie_valor = i.split(":")[1]
-                cookie_int = int(cookie_valor)
-                cookie_int=+ AUMENTO_COOKIE_POR_DEFECTO
-                cookie_header.split(":")[1] = cookie_int
-                cadena = ' '.join(cabeceras)
-                cadena = cadena.encode()
-                cs.send(cadena)
-                return cookie_int
-    cabeceras.append('Cookie: 1\n')
-    cadena = ' '.join(cabeceras)
-    cadena = cadena.encode()
-    cs.send(cadena)
-    return 1
+            try:
+                cookie_val = int(parts[1].strip())
+            except ValueError:
+                cookie_val = 1
 
-    
-    
-        
+        if cookie_val >= MAX_ACCESOS:
+            print("Maximo valor cookie")
+            cookie_val = MAX_ACCESOS
+        else:
+            cookie_val += AUMENTO_COOKIE_POR_DEFECTO
+            print(f"Valor de la cookie actual: {cookie_val}")
 
+        # Actualizar la cabecera en la lista
+        nueva_cabecera = f"{header_cookie}: {cookie_val}"
+        for idx, cab in enumerate(cabeceras):
+            if cab.startswith(header_cookie):
+                cabeceras[idx] = nueva_cabecera
+                break
+
+        # Reconstruir la cadena de cabeceras y enviarla
+        nueva_cadena = "\n".join(cabeceras)
+        cs.send(nueva_cadena.encode())
+        print("Enviar cabecera")
+        return cookie_val
+    else:
+        # Si no se encontró la cabecera, se añade con valor 1
+        nueva_cabecera = f"{header_cookie}: 1"
+        cabeceras.append(nueva_cabecera)
+        nueva_cadena = "\n".join(cabeceras)
+        cs.send(nueva_cadena.encode())
+        print("Crear cabecera")
+        return 1
 
 
 def process_web_request(cs, webroot):
@@ -153,7 +168,7 @@ def process_web_request(cs, webroot):
         ##          * Devuelve una lista con los atributos de las cabeceras.
             cabeceras = obtener_cabeceras(lineas)
          ##           * Comprobar si la versión de HTTP es 1.1
-            if not version.sartswith("HTTP/1.1"):
+            if not version.startswith("HTTP/1.1"):
                 break
         ##           * Comprobar si es un método GET o POST. Si no devolver un error Error 405 "Method Not Allowed".
             metodos_validos = {"GET", "POST"}
@@ -173,10 +188,10 @@ def process_web_request(cs, webroot):
          ##           * Analizar las cabeceras. Imprimir cada cabecera y su valor. Si la cabecera es Cookie comprobar
             for c in cabeceras:
                 print("c")
-                if c.startswith('Cookie:'):
+                if c.startswith('cookie_counter_16YY:'):
                     cookie_header = c
                     #found = True
-                    valor_cookie = process_cookies(c,cs)
+                    valor_cookie = process_cookies(datos,cs)
          ##             el valor de cookie_counter para ver si ha llegado a MAX_ACCESOS.
          ##             Si se ha llegado a MAX_ACCESOS devolver un Error "403 Forbidden"
                     if valor_cookie == MAX_ACCESOS:
@@ -190,12 +205,12 @@ def process_web_request(cs, webroot):
          ##             las cabeceras Date, Server, Connection, Set-Cookie (para la cookie cookie_counter),
          ##             Content-Length y Content-Type.
             
-            cabecera_Date = buscar_cabecera('Date :')
-            cabecera_Server = buscar_cabecera('Server :')
-            cabecera_Connection = buscar_cabecera('Connection :')
-            cabecera_Set_Cookie = buscar_cabecera('Set-Cookie :')
-            cabecera_Content_Length = buscar_cabecera('Content-Length :')
-            cabecera_Content_Type = buscar_cabecera( 'Content-Type :')
+            #cabecera_Date = buscar_cabecera('Date :')
+            #cabecera_Server = buscar_cabecera('Server :')
+            #cabecera_Connection = buscar_cabecera('Connection :')
+            #cabecera_Set_Cookie = buscar_cabecera('Set-Cookie :')
+            #cabecera_Content_Length = buscar_cabecera('Content-Length :')
+            #cabecera_Content_Type = buscar_cabecera( 'Content-Type :')
          
          ##           * Leer y enviar el contenido del fichero a retornar en el cuerpo de la respuesta.
            ##           * Se abre el fichero en modo lectura y modo binario
