@@ -103,7 +103,7 @@ def process_cookies(headers_str, cs):
         else:
             cookie_val = MAX_ACCESOS
 
-        nueva_cabecera = f"{header_cookie}: {cookie_val}"
+        nueva_cabecera = "{}: {}".format(header_cookie, cookie_val)
         for idx, cab in enumerate(cabeceras):
             if cab.startswith(header_cookie):
                 cabeceras[idx] = nueva_cabecera
@@ -113,7 +113,7 @@ def process_cookies(headers_str, cs):
         cs.send(nueva_cadena.encode())
         return cookie_val
     else:
-        nueva_cabecera = f"{header_cookie}: 1"
+        nueva_cabecera = "{}: 1".format(header_cookie)
         cabeceras.append(nueva_cabecera)
         nueva_cadena = "\n".join(cabeceras)
         cs.send(nueva_cadena.encode())
@@ -134,7 +134,7 @@ locale.setlocale(locale.LC_TIME, 'en_US.utf8')
 
 def get_handler(cs,webroot,url):
     # Si la URL empieza por "/" se traduce a index.html
-    recurso = "index.html" if url is "/" else url
+    recurso = "index.html" if url == "/" else url
 
     ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
 
@@ -151,9 +151,9 @@ def get_handler(cs,webroot,url):
 
     # Actualizamos la cookie usando el diccionario compartido
     valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
+    logger.info("Cookie para la IP actual: {}".format(valor_cookie))
 
-    logger.info(f"Cookie para la IP actual: {valor_cookie}")
-    #Comprobar que no se ha llegado al maximo
+    # Comprobar que no se ha llegado al máximo
     if valor_cookie == MAX_ACCESOS:
         logger.error("403 Forbidden: Máximo de accesos alcanzado")
         error_response = (
@@ -165,16 +165,16 @@ def get_handler(cs,webroot,url):
         cs.send(error_response.encode())
         return
 
-    date = datetime.datetime.now(datetime.UTC).strftime('%a, %d %b %Y %H:%M:%S GMT')
+    date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
-    #Hacemos la cabecera correcta si funciona correctamente
+    # Hacemos la cabecera correcta si funciona correctamente
     respuesta = (
         "HTTP/1.1 200 OK\r\n"
         "Server: web.nombreorganizacion0102.org\r\n"
-        f"Set-Cookie: cookie_counter_16YY={valor_cookie}\r\n"
+        "Set-Cookie: cookie_counter_16YY={}\r\n".format(valor_cookie) +
         "Content-Type: text/html\r\n"
-        f"Content-Length: {os.path.getsize(ruta_absoluta)}\r\n"
-        f"Date: {date}\r\n"
+        "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
+        "Date: {}\r\n".format(date) +
         "\r\n"
     )
     cs.send(respuesta.encode())
@@ -182,18 +182,20 @@ def get_handler(cs,webroot,url):
     with open(ruta_absoluta, "rb") as f:
         while True:
             bloque = f.read(BUFSIZE)
-            logger.info(f'bloque size:{len(bloque)} and bufsize: {BUFSIZE}')
+            #logger.info(f'bloque size:{len(bloque)} and bufsize: {BUFSIZE}')
+            logger.info('bloque size:{} and bufsize: {}'.format(len(bloque), BUFSIZE))        
             if not bloque:
                 break
             enviar_mensaje(cs, bloque)
     cerrar_conexion(cs)
 
 def post_handler(cs,webroot,url,data):
-    recurso = "accion_form.html" if url is "/" else url
-
+    #recurso = "accion_form.html" if url == "/" else url
+    recurso = "index.html" if url == "/" else url
     ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
     if not os.path.isfile(ruta_absoluta):
-        logger.error(f"404 Not Found: Recurso inexistente 1: {ruta_absoluta}")
+        #logger.error(f"404 Not Found: Recurso inexistente 1: {ruta_absoluta}")
+        logger.error("404 Not Found: Recurso inexistente 1: {}".format(ruta_absoluta))
         error_response = (
             "HTTP/1.1 404 Not Found\r\n"
             "Content-Type: text/html\r\n"
@@ -210,7 +212,8 @@ def post_handler(cs,webroot,url,data):
             ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
 
             if not os.path.isfile(ruta_absoluta):
-                logger.error(f"404 Not Found: Recurso inexistente 2: {ruta_absoluta}")
+                #logger.error(f"404 Not Found: Recurso inexistente 2: {ruta_absoluta}")
+                logger.error("404 Not Found: Recurso inexistente 2: {}".format(ruta_absoluta))
                 error_response = (
                     "HTTP/1.1 404 Not Found\r\n"
                     "Content-Type: text/html\r\n"
@@ -219,16 +222,16 @@ def post_handler(cs,webroot,url,data):
                 )
                 cs.send(error_response.encode())
                 return
-                # Hacemos la cabecera correcta si funciona correctamente
+
             valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
-            date = datetime.datetime.now(datetime.UTC).strftime('%a, %d %b %Y %H:%M:%S GMT')
+            date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
             respuesta = (
                 "HTTP/1.1 200 OK\r\n"
                 "Server: web.nombreorganizacion0102.org\r\n"
-                f"Set-Cookie: cookie_counter_16YY={valor_cookie}\r\n"
+                "Set-Cookie: cookie_counter_16YY={}\r\n".format(valor_cookie) +
                 "Content-Type: text/html\r\n"
-                f"Content-Length: {os.path.getsize(ruta_absoluta)}\r\n"
-                f"Date: {date}\r\n"
+                "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
+                "Date: {}\r\n".format(date) +
                 "\r\n"
             )
             cs.send(respuesta.encode())
@@ -239,8 +242,6 @@ def post_handler(cs,webroot,url,data):
                         break
                     cs.send(bloque)
 
-                #TODO
-
 def process_web_request(cs, webroot):
     """
     Procesa la petición web:
@@ -248,7 +249,7 @@ def process_web_request(cs, webroot):
       - Procesa la petición HTTP.
       - Actualiza la cookie 'cookie_counter_16YY' y la envía al cliente.
       - Verifica que el recurso exista; en caso contrario, envía error 404.
-      - Envía el contenido del fichero (en modo binario).
+            - Envía el contenido del fichero (en modo binario).
     """
 
     rlist, _, _ = select.select([cs], [], [], TIMEOUT_CONNECTION)
@@ -261,12 +262,14 @@ def process_web_request(cs, webroot):
         return
 
     datos_decoded = datos.decode()
-    logger.info(f"Solicitud recibida:\n{datos_decoded}")
+    #logger.info(f"Solicitud recibida:\n{datos_decoded}")
+    logger.info("Solicitud recibida:\n{}".format(datos_decoded))
     lineas = datos_decoded.split("\r\n")
     if len(lineas) < 1:
         return
 
-    logger.info(f"\n\ndatos:{lineas}\n\n")
+    #logger.info(f"\n\ndatos:{lineas}\n\n")
+    logger.info("\n\ndatos:{0}\n\n".format(lineas))
 
     linea_solicitud = lineas[0].strip()
     partes = linea_solicitud.split(" ")
@@ -298,10 +301,22 @@ def process_web_request(cs, webroot):
         cs.send(error_response.encode())
         logger.error("HTTP/1.1 405 Method Not Allowed")
         return
+    valor_connection, keep_alive = buscar_cabecera(lineas, "Connection:")
+    keep_alive = keep_alive and "keep-alive" in valor_connection.lower()
     if metodo=="GET":
         get_handler(cs, webroot, url)
+    if metodo=="POST":
+        content_lenght, found = buscar_cabecera(lineas, "Content-Length:")
+        if found: 
+            cuerpo = cs.recv(int(content_lenght.split(": ")[1])).decode() 
+        else: 
+            cuerpo = ""
+        post_handler(cs,webroot, url, cuerpo)
     else:
         post_handler(cs, webroot, url,lineas[len(lineas)-1])
+    if not keep_alive:
+        cerrar_conexion(cs)
+        return
 
 def main():
     """Función principal del servidor."""
@@ -318,8 +333,10 @@ def main():
         if args.verbose:
             logger.setLevel(logging.DEBUG)
 
-        logger.info(f"Enabling server in address {args.host} and port {args.port}.")
-        logger.info(f"Serving files from {args.webroot}")
+        #logger.info(f"Enabling server in address {args.host} and port {args.port}.")
+        #logger.info(f"Serving files from {args.webroot}")
+        logger.info("Enabling server in address {0} and port {1}.".format(args.host, args.port))
+        logger.info("Serving files from {0}".format(args.webroot))
 
         servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -329,7 +346,8 @@ def main():
 
         while True:
             cliente_socket, cliente_direccion = servidor.accept()
-            logger.info(f"Conexión aceptada de {cliente_direccion}")
+            #logger.info(f"Conexión aceptada de {cliente_direccion}")
+            logger.info("Conexión aceptada de {}".format(cliente_direccion))
             pid = os.fork()
             if pid == 0:
                 # Proceso hijo: cerrar el socket del servidor y procesar la petición
@@ -346,3 +364,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+     
