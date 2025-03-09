@@ -10,6 +10,8 @@ from multiprocessing import Manager  # Para compartir estado entre procesos
 import locale
 import datetime
 
+from urllib.parse import unquote
+
 BUFSIZE = 8192              # Tamaño máximo del buffer que se puede utilizar
 TIMEOUT_CONNECTION = 20     # Timeout para la conexión persistente
 MAX_ACCESOS = 10
@@ -59,6 +61,7 @@ def buscar_cabecera(cabeceras, nombre):
 # Creamos un Manager y un diccionario compartido para las cookies.
 manager = Manager()
 cookie_counters = manager.dict()
+
 
 def process_cookies_por_ip(cs, absolute_path):
     """
@@ -182,7 +185,6 @@ def get_handler(cs,webroot,url):
     with open(ruta_absoluta, "rb") as f:
         while True:
             bloque = f.read(BUFSIZE)
-            #logger.info(f'bloque size:{len(bloque)} and bufsize: {BUFSIZE}')
             logger.info('bloque size:{} and bufsize: {}'.format(len(bloque), BUFSIZE))        
             if not bloque:
                 break
@@ -190,11 +192,9 @@ def get_handler(cs,webroot,url):
     cerrar_conexion(cs)
 
 def post_handler(cs,webroot,url,data):
-    #recurso = "accion_form.html" if url == "/" else url
-    recurso = "index.html" if url == "/" else url
+    recurso = "accion_form.html" if url == "/" else url
     ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
     if not os.path.isfile(ruta_absoluta):
-        #logger.error(f"404 Not Found: Recurso inexistente 1: {ruta_absoluta}")
         logger.error("404 Not Found: Recurso inexistente 1: {}".format(ruta_absoluta))
         error_response = (
             "HTTP/1.1 404 Not Found\r\n"
@@ -205,14 +205,14 @@ def post_handler(cs,webroot,url,data):
         cs.send(error_response.encode())
         return
     if data.startswith("email="):
-        data = data.split("=")[1]
-        if data.endswith("um.es"):
-            recurso = "correo_correcto.html"  # Cambiar el recurso a enviar
+        email = unquote(data.split("=")[1]) 
+        logger.info("Email decodificado: {}".format(email))
 
+        if data.endswith("@um.es"):
+            logger.info("Correo válido")
+            recurso = "correo_correcto.html"
             ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
-
             if not os.path.isfile(ruta_absoluta):
-                #logger.error(f"404 Not Found: Recurso inexistente 2: {ruta_absoluta}")
                 logger.error("404 Not Found: Recurso inexistente 2: {}".format(ruta_absoluta))
                 error_response = (
                     "HTTP/1.1 404 Not Found\r\n"
@@ -241,6 +241,9 @@ def post_handler(cs,webroot,url,data):
                     if not bloque:
                         break
                     cs.send(bloque)
+        else:
+            recurso = "correo_incorrecto.html"
+
 
 def process_web_request(cs, webroot):
     """
@@ -262,13 +265,11 @@ def process_web_request(cs, webroot):
         return
 
     datos_decoded = datos.decode()
-    #logger.info(f"Solicitud recibida:\n{datos_decoded}")
     logger.info("Solicitud recibida:\n{}".format(datos_decoded))
     lineas = datos_decoded.split("\r\n")
     if len(lineas) < 1:
         return
 
-    #logger.info(f"\n\ndatos:{lineas}\n\n")
     logger.info("\n\ndatos:{0}\n\n".format(lineas))
 
     linea_solicitud = lineas[0].strip()
@@ -301,17 +302,38 @@ def process_web_request(cs, webroot):
         cs.send(error_response.encode())
         logger.error("HTTP/1.1 405 Method Not Allowed")
         return
+
+    content_type, found = buscar_cabecera(lineas, "Content-Type:")
+    logger.info("Content-Type recibido: {}".format(content_type if found else "No encontrado"))
+
     valor_connection, keep_alive = buscar_cabecera(lineas, "Connection:")
     keep_alive = keep_alive and "keep-alive" in valor_connection.lower()
+
+
     if metodo=="GET":
         get_handler(cs, webroot, url)
     if metodo=="POST":
-        content_lenght, found = buscar_cabecera(lineas, "Content-Length:")
-        if found: 
-            cuerpo = cs.recv(int(content_lenght.split(": ")[1])).decode() 
-        else: 
+        logger.info("Procesando POST")
+        for header in lineas:
+            logger.info("Cabecera recibida: {}".format(header))
+        content_length, found = buscar_cabecera(lineas, "Content-Length:")
+        if found:
+            content_length = int(content_length.split(": ")[1])
+            logger.info("Content-Length recibido: {}".format(content_length))
+            cuerpo = ""  
+            while len(cuerpo) < content_length:
+                fragmento = cs.recv(min(BUFSIZE, content_length - len(cuerpo)))
+                if not fragmento:
+                    break
+                cuerpo += fragmento 
+                logger.info("Recibidos {} bytes, acumulando {}".format(len(fragmento), len(cuerpo)))
+            cuerpo = cuerpo.decode()
+            logger.info("Cuerpo completo recibido: '{}'".format(cuerpo))
+            email, found = buscar_cabecera(lineas, "email:")
+            post_handler(cs, webroot, url, email)  
+        else:
             cuerpo = ""
-        post_handler(cs,webroot, url, cuerpo)
+            logger.info("No se encontró Content-Length, cuerpo vacío")
     else:
         post_handler(cs, webroot, url,lineas[len(lineas)-1])
     if not keep_alive:
@@ -333,8 +355,7 @@ def main():
         if args.verbose:
             logger.setLevel(logging.DEBUG)
 
-        #logger.info(f"Enabling server in address {args.host} and port {args.port}.")
-        #logger.info(f"Serving files from {args.webroot}")
+
         logger.info("Enabling server in address {0} and port {1}.".format(args.host, args.port))
         logger.info("Serving files from {0}".format(args.webroot))
 
@@ -346,8 +367,7 @@ def main():
 
         while True:
             cliente_socket, cliente_direccion = servidor.accept()
-            #logger.info(f"Conexión aceptada de {cliente_direccion}")
-            logger.info("Conexión aceptada de {}".format(cliente_direccion))
+            logger.info("Conexion aceptada de {}".format(cliente_direccion))
             pid = os.fork()
             if pid == 0:
                 # Proceso hijo: cerrar el socket del servidor y procesar la petición
