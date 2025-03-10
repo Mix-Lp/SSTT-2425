@@ -12,8 +12,10 @@ import datetime
 
 from urllib.parse import unquote
 
+suma = 1+9+1+2+10
+
 BUFSIZE = 8192              # Tamaño máximo del buffer que se puede utilizar
-TIMEOUT_CONNECTION = 20     # Timeout para la conexión persistente
+TIMEOUT_CONNECTION = suma     # Timeout para la conexión persistente
 MAX_ACCESOS = 10
 BACKLOG = 64
 AUMENTO_COOKIE_POR_DEFECTO = 1
@@ -86,11 +88,11 @@ def process_cookies_por_ip(cs, absolute_path):
 
 def process_cookies(headers_str, cs):
     """
-    Procesa la cookie 'cookie_counter_16YY' leyendo la petición.
+    Procesa la cookie 'cookie_counter_1619' leyendo la petición.
     (Esta función se mantiene para cuando el cliente envía la cookie, pero
     en este ejemplo usaremos process_cookies_por_ip para persistir el valor).
     """
-    header_cookie = "cookie_counter_16YY"
+    header_cookie = "cookie_counter_1619"
     cabeceras = headers_str.split("\n")
     cookie_header, found = buscar_cabecera(cabeceras, header_cookie)
 
@@ -173,8 +175,10 @@ def get_handler(cs,webroot,url):
     # Hacemos la cabecera correcta si funciona correctamente
     respuesta = (
         "HTTP/1.1 200 OK\r\n"
-        "Server: web.nombreorganizacion0102.org\r\n"
-        "Set-Cookie: cookie_counter_16YY={}\r\n".format(valor_cookie) +
+        "Connection: keep-alive\r\n"
+        "Keep-Alive: timeout={}\r\n".format(suma) +
+        "Server: web.internetmagico1219.org\r\n"
+        "Set-Cookie: cookie_counter_1619={}\r\n".format(valor_cookie) +
         "Content-Type: text/html\r\n"
         "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
         "Date: {}\r\n".format(date) +
@@ -205,10 +209,11 @@ def post_handler(cs,webroot,url,data):
         cs.send(error_response.encode())
         return
     if data.startswith("email="):
+        logger.info("Email detectado metodo POST {}".format(data))
         email = unquote(data.split("=")[1]) 
         logger.info("Email decodificado: {}".format(email))
 
-        if data.endswith("@um.es"):
+        if email.endswith("@um.es"):
             logger.info("Correo válido")
             recurso = "correo_correcto.html"
             ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
@@ -227,8 +232,10 @@ def post_handler(cs,webroot,url,data):
             date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
             respuesta = (
                 "HTTP/1.1 200 OK\r\n"
-                "Server: web.nombreorganizacion0102.org\r\n"
-                "Set-Cookie: cookie_counter_16YY={}\r\n".format(valor_cookie) +
+                "Connection: keep-alive\r\n"
+                "Keep-Alive: timeout={}\r\n".format(suma) +
+                "Server: web.internetmagico1219.org\r\n"
+                "Set-Cookie: cookie_counter_1619={}\r\n".format(valor_cookie) +
                 "Content-Type: text/html\r\n"
                 "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
                 "Date: {}\r\n".format(date) +
@@ -243,6 +250,38 @@ def post_handler(cs,webroot,url,data):
                     cs.send(bloque)
         else:
             recurso = "correo_incorrecto.html"
+            ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
+            if not os.path.isfile(ruta_absoluta):
+                logger.error("404 Not Found: Recurso inexistente 2: {}".format(ruta_absoluta))
+                error_response = (
+                    "HTTP/1.1 404 Not Found\r\n"
+                    "Content-Type: text/html\r\n"
+                    "Content-Length: 0\r\n"
+                    "\r\n"
+                )
+                cs.send(error_response.encode())
+                return
+
+            valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
+            date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+            respuesta = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Connection: keep-alive\r\n"
+                    "Keep-Alive: timeout={}\r\n".format(suma) +
+                    "Server: web.internetmagico1219.org\r\n"
+                    "Set-Cookie: cookie_counter_1619={}\r\n".format(valor_cookie) +
+                    "Content-Type: text/html\r\n"
+                    "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
+                    "Date: {}\r\n".format(date) +
+                    "\r\n"
+            )
+            cs.send(respuesta.encode())
+            with open(ruta_absoluta, "rb") as f:
+                while True:
+                    bloque = f.read(BUFSIZE)
+                    if not bloque:
+                        break
+                    cs.send(bloque)
 
 
 def process_web_request(cs, webroot):
@@ -250,14 +289,16 @@ def process_web_request(cs, webroot):
     Procesa la petición web:
       - Espera datos (o timeout) en el socket.
       - Procesa la petición HTTP.
-      - Actualiza la cookie 'cookie_counter_16YY' y la envía al cliente.
+      - Actualiza la cookie 'cookie_counter_1619' y la envía al cliente.
       - Verifica que el recurso exista; en caso contrario, envía error 404.
             - Envía el contenido del fichero (en modo binario).
     """
 
     rlist, _, _ = select.select([cs], [], [], TIMEOUT_CONNECTION)
+    logger.debug(f"select retornó: {rlist}")
     if cs not in rlist:
         logger.debug("Timeout sin actividad; cerrando conexión")
+        cs.close()
         return
 
     datos = cs.recv(BUFSIZE)
@@ -306,38 +347,38 @@ def process_web_request(cs, webroot):
     content_type, found = buscar_cabecera(lineas, "Content-Type:")
     logger.info("Content-Type recibido: {}".format(content_type if found else "No encontrado"))
 
-    valor_connection, keep_alive = buscar_cabecera(lineas, "Connection:")
-    keep_alive = keep_alive and "keep-alive" in valor_connection.lower()
 
 
     if metodo=="GET":
         get_handler(cs, webroot, url)
     if metodo=="POST":
         logger.info("Procesando POST")
-        for header in lineas:
-            logger.info("Cabecera recibida: {}".format(header))
+        # for header in lineas:
+        #     logger.info("Cabecera recibida: {}".format(header))
         content_length, found = buscar_cabecera(lineas, "Content-Length:")
         if found:
             content_length = int(content_length.split(": ")[1])
             logger.info("Content-Length recibido: {}".format(content_length))
-            cuerpo = ""  
-            while len(cuerpo) < content_length:
-                fragmento = cs.recv(min(BUFSIZE, content_length - len(cuerpo)))
-                if not fragmento:
-                    break
-                cuerpo += fragmento 
-                logger.info("Recibidos {} bytes, acumulando {}".format(len(fragmento), len(cuerpo)))
-            cuerpo = cuerpo.decode()
-            logger.info("Cuerpo completo recibido: '{}'".format(cuerpo))
-            email, found = buscar_cabecera(lineas, "email:")
-            post_handler(cs, webroot, url, email)  
+            cuerpo = ""
+            # logger.info("Antes del while")
+            # while len(cuerpo) < content_length:
+            #     logger.info("Entra en while")
+            #     fragmento = recibir_mensaje(cs)
+            #     logger.info("Fragmento recibido: {}".format(fragmento))
+            #     if not fragmento:
+            #         break
+            #     cuerpo += fragmento
+            #     logger.info("Recibidos {} bytes, acumulando {}".format(len(fragmento), len(cuerpo)))
+            # cuerpo = cuerpo.decode()
+            # logger.info("Cuerpo completo recibido: '{}'".format(cuerpo))
+            email, found = buscar_cabecera(lineas, "email=")
+            if found:
+                post_handler(cs, webroot, url, email)
         else:
             cuerpo = ""
             logger.info("No se encontró Content-Length, cuerpo vacío")
     else:
         post_handler(cs, webroot, url,lineas[len(lineas)-1])
-    if not keep_alive:
-        cerrar_conexion(cs)
         return
 
 def main():
