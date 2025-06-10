@@ -12,13 +12,17 @@ import datetime
 
 from urllib.parse import unquote
 
-suma = 1+9+1+2+10
+# Suma para calcular timeout de persistencia (1+9+1+2+10 = 23 s)
+suma = 1 + 9 + 1 + 2 + 10
 
-BUFSIZE = 8192              # Tamaño máximo del buffer que se puede utilizar
-TIMEOUT_CONNECTION = suma     # Timeout para la conexión persistente
+BUFSIZE = 8192              # Tamaño máximo del buffer
+TIMEOUT_CONNECTION = suma   # Timeout para la conexión persistente (23 segundos)
 MAX_ACCESOS = 10
 BACKLOG = 64
 AUMENTO_COOKIE_POR_DEFECTO = 1
+
+# Nombre del servidor para cabecera uniforme
+SERVER_NAME = 'web.internetmagico1219.org'
 
 # Extensiones admitidas (extension, MIME type)
 filetypes = {
@@ -38,392 +42,363 @@ logging.basicConfig(level=logging.INFO,
                     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
 
+# Funciones auxiliares:
+
 def enviar_mensaje(cs, data):
-    """Envía datos a través del socket cs."""
     return cs.send(data)
 
 def recibir_mensaje(cs):
-    """Recibe datos a través del socket cs."""
     return cs.recv(BUFSIZE)
 
 def cerrar_conexion(cs):
-    """Cierra una conexión activa."""
     cs.close()
 
 def buscar_cabecera(cabeceras, nombre):
-    """
-    Busca una cabecera en la lista 'cabeceras'.
-    Retorna (cabecera, True) si se encuentra o (None, False) en caso contrario.
-    """
     for linea in cabeceras:
         if linea.startswith(nombre):
             return linea.strip(), True
     return None, False
 
-# Creamos un Manager y un diccionario compartido para las cookies.
+# Manager y diccionario compartido para cookies
 manager = Manager()
 cookie_counters = manager.dict()
 
-
 def process_cookies_por_ip(cs, absolute_path):
-    """
-    Actualiza la cookie asociada a la IP del cliente usando el diccionario compartido.
-    Incrementa el contador (hasta MAX_ACCESOS) y envía la cabecera Set-Cookie.
-    """
     ip, _ = cs.getpeername()
-
-    if ip in cookie_counters:
-        valor = cookie_counters[ip]
-        if "index.html" in absolute_path:
-            if valor < MAX_ACCESOS:
-                valor += AUMENTO_COOKIE_POR_DEFECTO
-            else:
-                valor = MAX_ACCESOS
-    else:
-        valor = 1
-
-    cookie_counters[ip] = valor
-
-    return valor
-
-def process_cookies(headers_str, cs):
-    """
-    Procesa la cookie 'cookie_counter_1619' leyendo la petición.
-    (Esta función se mantiene para cuando el cliente envía la cookie, pero
-    en este ejemplo usaremos process_cookies_por_ip para persistir el valor).
-    """
-    header_cookie = "cookie_counter_1619"
-    cabeceras = headers_str.split("\n")
-    cookie_header, found = buscar_cabecera(cabeceras, header_cookie)
-
-    if found:
-        parts = cookie_header.split(":")
-        try:
-            cookie_val = int(parts[1].strip())
-        except (ValueError, IndexError):
-            cookie_val = 1
-
-        if cookie_val < MAX_ACCESOS:
-            cookie_val += AUMENTO_COOKIE_POR_DEFECTO
+    valor = cookie_counters.get(ip, 0)
+    if os.path.basename(absolute_path) == 'index.html':
+        if valor < MAX_ACCESOS:
+            valor += AUMENTO_COOKIE_POR_DEFECTO
         else:
-            cookie_val = MAX_ACCESOS
-
-        nueva_cabecera = "{}: {}".format(header_cookie, cookie_val)
-        for idx, cab in enumerate(cabeceras):
-            if cab.startswith(header_cookie):
-                cabeceras[idx] = nueva_cabecera
-                break
-
-        nueva_cadena = "\n".join(cabeceras)
-        cs.send(nueva_cadena.encode())
-        return cookie_val
-    else:
-        nueva_cabecera = "{}: 1".format(header_cookie)
-        cabeceras.append(nueva_cabecera)
-        nueva_cadena = "\n".join(cabeceras)
-        cs.send(nueva_cadena.encode())
-        return 1
-
-def obtener_cabeceras(lineas):
-    """
-    Extrae de la lista 'lineas' (divididas por CRLF) aquellas líneas que contienen ": ".
-    Se ignora la primera línea (la de solicitud).
-    """
-    cabeceras = []
-    for linea in lineas[1:]:
-        if ": " in linea:
-            cabeceras.append(linea.strip())
-    return cabeceras
+            valor = MAX_ACCESOS
+    cookie_counters[ip] = valor
+    return valor
 
 locale.setlocale(locale.LC_TIME, 'en_US.utf8')
 
-def get_handler(cs,webroot,url):
-    # Si la URL empieza por "/" se traduce a index.html
-    recurso = "index.html" if url == "/" else url
+# Manejadores de GET y POST
 
-    ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
+def get_handler(cs, webroot, url):
+    recurso = 'index.html' if url == '/' else url
+    ruta_absoluta = os.path.join(webroot, recurso.lstrip('/'))
 
+    # 404 Not Found
     if not os.path.isfile(ruta_absoluta):
-        logger.error("404 Not found: Recurso inexistente")
-        error_response = (
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n"
-        )
-        cs.send(error_response.encode())
+        logger.error('404 Not Found: %s no existe', recurso)
+        error_headers = [
+            'HTTP/1.1 404 Not Found',
+            f'Server: {SERVER_NAME}',
+            'Content-Type: text/html',
+            'Content-Length: 0',
+            'Connection: close',
+            '', ''
+        ]
+        try:
+            logger.error('\r\n'.join(error_headers))
+            cs.send('\r\n'.join(error_headers).encode())
+        except BrokenPipeError:
+            logger.warning('Cliente cerró la conexión antes de recibir el 404')
+        finally:
+            cerrar_conexion(cs)
         return
 
-    # Actualizamos la cookie usando el diccionario compartido
-    valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
-    logger.info("Cookie para la IP actual: {}".format(valor_cookie))
-
-    # Comprobar que no se ha llegado al máximo
-    if valor_cookie == MAX_ACCESOS:
-        logger.error("403 Forbidden: Máximo de accesos alcanzado")
-        error_response = (
-            "HTTP/1.1 403 Forbidden\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n"
-        )
-        cs.send(error_response.encode())
-        return
-
+    # 200 OK
     date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+    headers = [
+        'HTTP/1.1 200 OK',
+        f'Server: {SERVER_NAME}',
+        f'Connection: keep-alive',
+        f'Keep-Alive: timeout={TIMEOUT_CONNECTION}'
+    ]
 
-    # Hacemos la cabecera correcta si funciona correctamente
-    respuesta = (
-        "HTTP/1.1 200 OK\r\n"
-        "Connection: keep-alive\r\n"
-        "Keep-Alive: timeout={}\r\n".format(suma) +
-        "Server: web.internetmagico1219.org\r\n"
-        "Set-Cookie: cookie_counter_1619={}\r\n".format(valor_cookie) +
-        "Content-Type: text/html\r\n"
-        "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
-        "Date: {}\r\n".format(date) +
-        "\r\n"
-    )
-    cs.send(respuesta.encode())
+    # Cookies en index.html
+    if recurso == 'index.html':
+        valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
+        logger.info('Cookie para index.html: %d', valor_cookie)
+        if valor_cookie == MAX_ACCESOS:
+            # 403 Forbidden
+            logger.error('403 Forbidden: Máximo de accesos alcanzado')
+            error_headers = [
+                'HTTP/1.1 403 Forbidden',
+                f'Server: {SERVER_NAME}',
+                'Content-Type: text/html',
+                'Content-Length: 0',
+                'Connection: close',
+                '', ''
+            ]
+            try:
+                logger.error('\r\n'.join(error_headers))
+                cs.send('\r\n'.join(error_headers).encode())
+            except BrokenPipeError:
+                logger.warning('Cliente cerró la conexión antes de recibir el 403')
+            finally:
+                cerrar_conexion(cs)
+            return
+        headers.append(f'Set-Cookie: cookie_counter_1219={valor_cookie}; Max-Age=120; Path=/')
 
-    with open(ruta_absoluta, "rb") as f:
+    # Tipo MIME, longitud y fecha
+    ext = os.path.splitext(ruta_absoluta)[1].lstrip('.').lower()
+    mime = filetypes.get(ext, 'application/octet-stream')
+    headers.extend([
+        f'Content-Type: {mime}',
+        f'Content-Length: {os.path.getsize(ruta_absoluta)}',
+        f'Date: {date}',
+        '', ''
+    ])
+
+    # Enviar respuesta
+    try:
+        logger.info('\r\n'.join(headers))
+        cs.send('\r\n'.join(headers).encode())
+    except BrokenPipeError:
+        logger.warning('Cliente cerró la conexión antes de recibir las cabeceras')
+        cerrar_conexion(cs)
+        return
+
+    with open(ruta_absoluta, 'rb') as f:
         while True:
             bloque = f.read(BUFSIZE)
-            logger.info('bloque size:{} and bufsize: {}'.format(len(bloque), BUFSIZE))        
             if not bloque:
                 break
-            enviar_mensaje(cs, bloque)
+            try:
+                cs.send(bloque)
+            except BrokenPipeError:
+                logger.warning('Cliente cerró la conexión leyendo el body')
+                break
+
     cerrar_conexion(cs)
 
-def post_handler(cs,webroot,url,data):
-    recurso = "accion_form.html" if url == "/" else url
-    ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
+
+def post_handler(cs, webroot, url, form_data):
+    recurso = 'accion_form.html' if url == '/' else url
+    ruta_absoluta = os.path.join(webroot, recurso.lstrip('/'))
+
+    # 404 Not Found POST
     if not os.path.isfile(ruta_absoluta):
-        logger.error("404 Not Found: Recurso inexistente 1: {}".format(ruta_absoluta))
-        error_response = (
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n"
-        )
-        cs.send(error_response.encode())
+        logger.error('404 Not Found: %s', ruta_absoluta)
+        error_headers = [
+            'HTTP/1.1 404 Not Found',
+            f'Server: {SERVER_NAME}',
+            'Content-Type: text/html',
+            'Content-Length: 0',
+            'Connection: close',
+            '', ''
+        ]
+        try:
+            logger.error('\r\n'.join(error_headers))
+            cs.send('\r\n'.join(error_headers).encode())
+        except BrokenPipeError:
+            pass
+        finally:
+            cerrar_conexion(cs)
         return
-    if data.startswith("email="):
-        logger.info("Email detectado metodo POST {}".format(data))
-        email = unquote(data.split("=")[1]) 
-        logger.info("Email decodificado: {}".format(email))
 
-        if email.endswith("@um.es"):
-            logger.info("Correo válido")
-            recurso = "correo_correcto.html"
-            ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
-            if not os.path.isfile(ruta_absoluta):
-                logger.error("404 Not Found: Recurso inexistente 2: {}".format(ruta_absoluta))
-                error_response = (
-                    "HTTP/1.1 404 Not Found\r\n"
-                    "Content-Type: text/html\r\n"
-                    "Content-Length: 0\r\n"
-                    "\r\n"
-                )
-                cs.send(error_response.encode())
-                return
+    # Procesar formulario
+    if form_data.startswith('email='):
+        email = unquote(form_data.split('=', 1)[1])
+        date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
+        status_line = 'HTTP/1.1 200 OK'
+        body_file = 'correo_correcto.html' if email.endswith('@um.es') else 'correo_incorrecto.html'
+        ruta_absoluta = os.path.join(webroot, body_file)
 
-            valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
-            date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
-            respuesta = (
-                "HTTP/1.1 200 OK\r\n"
-                "Connection: keep-alive\r\n"
-                "Keep-Alive: timeout={}\r\n".format(suma) +
-                "Server: web.internetmagico1219.org\r\n"
-                "Set-Cookie: cookie_counter_1619={}\r\n".format(valor_cookie) +
-                "Content-Type: text/html\r\n"
-                "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
-                "Date: {}\r\n".format(date) +
-                "\r\n"
-            )
-            cs.send(respuesta.encode())
-            with open(ruta_absoluta, "rb") as f:
-                while True:
-                    bloque = f.read(BUFSIZE)
-                    if not bloque:
-                        break
+        if not os.path.isfile(ruta_absoluta):
+            logger.error('404 Not Found: %s', ruta_absoluta)
+            error_headers = [
+                'HTTP/1.1 404 Not Found',
+                f'Server: {SERVER_NAME}',
+                'Content-Type: text/html',
+                'Content-Length: 0',
+                'Connection: close',
+                '', ''
+            ]
+            try:
+                logger.error('\r\n'.join(error_headers))
+                cs.send('\r\n'.join(error_headers).encode())
+            except BrokenPipeError:
+                pass
+            finally:
+                cerrar_conexion(cs)
+            return
+
+        # Cabeceras respuesta POST
+        headers = [
+            status_line,
+            'Connection: keep-alive',
+            f'Keep-Alive: timeout={TIMEOUT_CONNECTION}',
+            f'Server: {SERVER_NAME}',
+            f'Set-Cookie: cookie_counter_1619={valor_cookie}; Max-Age=120; Path=/',
+            'Content-Type: text/html',
+            f'Content-Length: {os.path.getsize(ruta_absoluta)}',
+            f'Date: {date}',
+            '', ''
+        ]
+        try:
+            logger.error('\r\n'.join(headers))
+            cs.send('\r\n'.join(headers).encode())
+        except BrokenPipeError:
+            cerrar_conexion(cs)
+            return
+
+        with open(ruta_absoluta, 'rb') as f:
+            while True:
+                bloque = f.read(BUFSIZE)
+                if not bloque:
+                    break
+                try:
                     cs.send(bloque)
-        else:
-            recurso = "correo_incorrecto.html"
-            ruta_absoluta = os.path.join(webroot, recurso.lstrip("/"))
-            if not os.path.isfile(ruta_absoluta):
-                logger.error("404 Not Found: Recurso inexistente 2: {}".format(ruta_absoluta))
-                error_response = (
-                    "HTTP/1.1 404 Not Found\r\n"
-                    "Content-Type: text/html\r\n"
-                    "Content-Length: 0\r\n"
-                    "\r\n"
-                )
-                cs.send(error_response.encode())
-                return
+                except BrokenPipeError:
+                    break
 
-            valor_cookie = process_cookies_por_ip(cs, ruta_absoluta)
-            date = datetime.datetime.now(datetime.timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
-            respuesta = (
-                    "HTTP/1.1 200 OK\r\n"
-                    "Connection: keep-alive\r\n"
-                    "Keep-Alive: timeout={}\r\n".format(suma) +
-                    "Server: web.internetmagico1219.org\r\n"
-                    "Set-Cookie: cookie_counter_1619={}\r\n".format(valor_cookie) +
-                    "Content-Type: text/html\r\n"
-                    "Content-Length: {}\r\n".format(os.path.getsize(ruta_absoluta)) +
-                    "Date: {}\r\n".format(date) +
-                    "\r\n"
-            )
-            cs.send(respuesta.encode())
-            with open(ruta_absoluta, "rb") as f:
-                while True:
-                    bloque = f.read(BUFSIZE)
-                    if not bloque:
-                        break
-                    cs.send(bloque)
+    cerrar_conexion(cs)
 
 
 def process_web_request(cs, webroot):
-    """
-    Procesa la petición web:
-      - Espera datos (o timeout) en el socket.
-      - Procesa la petición HTTP.
-      - Actualiza la cookie 'cookie_counter_1619' y la envía al cliente.
-      - Verifica que el recurso exista; en caso contrario, envía error 404.
-            - Envía el contenido del fichero (en modo binario).
-    """
-
+    # Esperar petición o timeout
     rlist, _, _ = select.select([cs], [], [], TIMEOUT_CONNECTION)
-    logger.debug(f"select retornó: {rlist}")
-    if cs not in rlist:
-        logger.debug("Timeout sin actividad; cerrando conexión")
-        cs.close()
-        return
+    if cs in rlist:
+        datos = cs.recv(BUFSIZE)
+        if not datos:
+            cerrar_conexion(cs)
+            return
+    else:
+        cerrar_conexion(cs)
 
-    datos = cs.recv(BUFSIZE)
-    if len(datos) <= 0:
-        return
+    # Separar cabeceras (raw header) y resto (body parcial)
+    try:
+        raw_header, rest = datos.split(b'\r\n\r\n', 1)
+    except ValueError:
+        raw_header = datos
+        rest = b''
 
-    datos_decoded = datos.decode()
-    logger.info("Solicitud recibida:\n{}".format(datos_decoded))
-    lineas = datos_decoded.split("\r\n")
-    if len(lineas) < 1:
+    datos_decoded = raw_header.decode(errors='replace')
+    lineas = datos_decoded.split('\r\n')
+    if not lineas:
+        cerrar_conexion(cs)
         return
-
-    logger.info("\n\ndatos:{0}\n\n".format(lineas))
 
     linea_solicitud = lineas[0].strip()
-    partes = linea_solicitud.split(" ")
+    partes = linea_solicitud.split(' ')
+
+    # Bad Request
     if len(partes) != 3:
-        error_response = (
-            "HTTP/1.1 400 Bad Request\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n"
-        )
-        logger.error("HTTP/1.1 400 Bad Request")
-        cs.send(error_response.encode())
+        logger.error('400 Bad Request: formato de petición incorrecto')
+        error_headers = [
+            'HTTP/1.1 400 Bad Request',
+            f'Server: {SERVER_NAME}',
+            'Content-Type: text/html',
+            'Content-Length: 0',
+            'Connection: close',
+            '', ''
+        ]
+        try:
+            logger.error('\r\n'.join(error_headers))
+            cs.send('\r\n'.join(error_headers).encode())
+        except BrokenPipeError:
+            pass
+        finally:
+            cerrar_conexion(cs)
         return
 
     metodo, url, version = partes
 
-    if not version.startswith("HTTP/1.1"):
-        logger.error("Versión HTTP no soportada")
+    # HTTP Version
+    if version not in ('HTTP/1.1', 'HTTP/1.0'):
+        logger.error('505 HTTP Version Not Supported: %s', version)
+        error_headers = [
+            'HTTP/1.1 505 HTTP Version Not Supported',
+            f'Server: {SERVER_NAME}',
+            'Content-Type: text/html',
+            'Content-Length: 0',
+            'Connection: close',
+            '', ''
+        ]
+        try:
+            logger.error('\r\n'.join(error_headers))
+            cs.send('\r\n'.join(error_headers).encode())
+        except BrokenPipeError:
+            pass
+        finally:
+            cerrar_conexion(cs)
         return
 
-    metodos_validos = {"GET", "POST"}
-    if metodo not in metodos_validos:
-        error_response = (
-            "HTTP/1.1 405 Method Not Allowed\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 0\r\n"
-            "\r\n"
-        )
-        cs.send(error_response.encode())
-        logger.error("HTTP/1.1 405 Method Not Allowed")
+    # Métodos soportados
+    if metodo not in ('GET', 'POST'):
+        logger.error('405 Method Not Allowed: %s', metodo)
+        error_headers = [
+            'HTTP/1.1 405 Method Not Allowed',
+            f'Server: {SERVER_NAME}',
+            'Allow: GET, POST',
+            'Content-Type: text/html',
+            'Content-Length: 0',
+            'Connection: close',
+            '', ''
+        ]
+        try:
+            logger.error('\r\n'.join(error_headers))
+            cs.send('\r\n'.join(error_headers).encode())
+        except BrokenPipeError:
+            pass
+        finally:
+            cerrar_conexion(cs)
         return
 
-    content_type, found = buscar_cabecera(lineas, "Content-Type:")
-    logger.info("Content-Type recibido: {}".format(content_type if found else "No encontrado"))
-
-
-
-    if metodo=="GET":
+    # Delegar a GET o POST
+    if metodo == 'GET':
         get_handler(cs, webroot, url)
-    if metodo=="POST":
-        logger.info("Procesando POST")
-        # for header in lineas:
-        #     logger.info("Cabecera recibida: {}".format(header))
-        content_length, found = buscar_cabecera(lineas, "Content-Length:")
-        if found:
-            content_length = int(content_length.split(": ")[1])
-            logger.info("Content-Length recibido: {}".format(content_length))
-            cuerpo = ""
-            # logger.info("Antes del while")
-            # while len(cuerpo) < content_length:
-            #     logger.info("Entra en while")
-            #     fragmento = recibir_mensaje(cs)
-            #     logger.info("Fragmento recibido: {}".format(fragmento))
-            #     if not fragmento:
-            #         break
-            #     cuerpo += fragmento
-            #     logger.info("Recibidos {} bytes, acumulando {}".format(len(fragmento), len(cuerpo)))
-            # cuerpo = cuerpo.decode()
-            # logger.info("Cuerpo completo recibido: '{}'".format(cuerpo))
-            email, found = buscar_cabecera(lineas, "email=")
-            if found:
-                post_handler(cs, webroot, url, email)
-        else:
-            cuerpo = ""
-            logger.info("No se encontró Content-Length, cuerpo vacío")
     else:
-        post_handler(cs, webroot, url,lineas[len(lineas)-1])
-        return
+        # Leer body según Content-Length, usando lo que ya vino en 'rest'
+        content_length, found = buscar_cabecera(lineas, 'Content-Length:')
+        form_data = ''
+        if found:
+            try:
+                length = int(content_length.split(':', 1)[1].strip())
+                body_bytes = rest
+                remaining = length - len(body_bytes)
+                while remaining > 0:
+                    chunk = cs.recv(min(remaining, BUFSIZE))
+                    if not chunk:
+                        break
+                    body_bytes += chunk
+                    remaining -= len(chunk)
+                form_data = body_bytes.decode(errors='replace')
+            except Exception:
+                logger.warning('Error leyendo cuerpo de la petición')
+        post_handler(cs, webroot, url, form_data)
+
 
 def main():
-    """Función principal del servidor."""
     try:
         parser = argparse.ArgumentParser()
-        parser.add_argument("-p", "--port", help="Puerto del servidor", type=int, required=True)
-        parser.add_argument("-ip", "--host", help="Dirección IP del servidor o localhost", required=True)
-        parser.add_argument("-wb", "--webroot",
-                            help="Directorio base desde donde se sirven los ficheros (p.ej. /home/user/mi_web)",
-                            required=True)
-        parser.add_argument('--verbose', '-v', action='store_true', help='Incluir mensajes de depuración en la salida')
+        parser.add_argument('-p', '--port', type=int, required=True)
+        parser.add_argument('-ip', '--host', required=True)
+        parser.add_argument('-wb', '--webroot', required=True)
+        parser.add_argument('-v', '--verbose', action='store_true')
         args = parser.parse_args()
 
         if args.verbose:
             logger.setLevel(logging.DEBUG)
 
-
-        logger.info("Enabling server in address {0} and port {1}.".format(args.host, args.port))
-        logger.info("Serving files from {0}".format(args.webroot))
-
+        logger.info('Servidor en %s:%d, sirviendo %s', args.host, args.port, args.webroot)
         servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((args.host, args.port))
         servidor.listen(BACKLOG)
-        logger.info("Servidor escuchando conexiones...")
 
         while True:
-            cliente_socket, cliente_direccion = servidor.accept()
-            logger.info("Conexion aceptada de {}".format(cliente_direccion))
+            cs, addr = servidor.accept()
+            logger.info('Conexión desde %s', addr)
             pid = os.fork()
             if pid == 0:
-                # Proceso hijo: cerrar el socket del servidor y procesar la petición
                 servidor.close()
-                process_web_request(cliente_socket, args.webroot)
-                os._exit(0) # instead of sys.exit because sys.exit is doing the callbacks
-                            # to the multiprocessing Manager, which we want to avoid
+                process_web_request(cs, args.webroot)
+                os._exit(0)
             else:
-                # Proceso padre: cerrar el socket del cliente
-                cliente_socket.close()
+                cs.close()
     except KeyboardInterrupt:
-        logger.info("Interrupción detectada. Cerrando servidor.")
-        cerrar_conexion(servidor)
+        logger.info('Interrupción detectada. Cerrando servidor.')
+    finally:
+        servidor.close()
 
 if __name__ == "__main__":
     main()
-
-     
